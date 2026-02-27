@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
+import '../services/api_service.dart';
 import 'dashboard_screen.dart';
 import 'test_screen.dart';
 import 'camera_upload_screen.dart';
@@ -46,8 +47,10 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
+              await ApiService.logout();
+              if (!context.mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
               );

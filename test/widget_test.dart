@@ -11,7 +11,7 @@ import 'package:aiexamprediction/main.dart';
 
 void main() {
   testWidgets('App launches with login screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const ExamAIApp());
+    await tester.pumpWidget(const ExamAIApp(isLoggedIn: false));
 
     // Verify that the login screen is shown
     expect(find.text('ExamAI'), findsOneWidget);

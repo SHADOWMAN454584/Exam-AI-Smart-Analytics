@@ -1,61 +1,212 @@
 import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../constants/sample_data.dart';
+import '../services/api_service.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final tests = SampleData.mockTestHistory;
-    final latest = tests.first;
-    final latestScore = (latest['score'] as int).toDouble();
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Greeting
-          _buildGreeting(),
-          const SizedBox(height: 24),
-          // Overall Score Card
-          _buildOverallScoreCard(latestScore),
-          const SizedBox(height: 20),
-          // Quick Stats Row
-          _buildQuickStats(tests),
-          const SizedBox(height: 24),
-          // Progress Trend
-          const Text(
-            'Weekly Progress',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildProgressChart(),
-          const SizedBox(height: 24),
-          // Recent Tests
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Recent Tests',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
+class _DashboardScreenState extends State<DashboardScreen> {
+  bool _isLoading = true;
+  Map<String, dynamic>? _overview;
+  List<Map<String, dynamic>> _attempts = [];
+  List<Map<String, dynamic>> _progressData = [];
+  String? _errorMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMsg = null;
+    });
+    try {
+      final results = await Future.wait([
+        ApiService.getAnalyticsOverview(),
+        ApiService.getTestHistory(),
+        ApiService.getAnalyticsProgress(),
+      ]);
+      final overview = results[0] as Map<String, dynamic>;
+      final attempts = (results[1] as List).cast<Map<String, dynamic>>();
+      final progressRaw = results[2] as Map<String, dynamic>;
+      final progressList = (progressRaw['weekly_progress'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() {
+          _overview = overview;
+          _attempts = attempts;
+          _progressData = progressList;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      // Fallback to sample data
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMsg = 'Using offline data';
+        });
+      }
+    }
+  }
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  String get _displayName {
+    final user = ApiService.currentUser;
+    if (user != null) {
+      final name = user['full_name']?.toString() ?? SampleData.sampleName;
+      return name.split(' ').first;
+    }
+    return SampleData.sampleName.split(' ').first;
+  }
+
+  String get _avatarInitials {
+    final user = ApiService.currentUser;
+    if (user != null) {
+      final name = user['full_name']?.toString() ?? SampleData.sampleAvatar;
+      final parts = name.trim().split(' ');
+      if (parts.length >= 2)
+        return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+      return parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return SampleData.sampleAvatar;
+  }
+
+  double get _latestScore {
+    if (_attempts.isNotEmpty) {
+      final pct = _attempts.first['percentage'];
+      if (pct != null) return (pct as num).toDouble();
+    }
+    if (_overview != null) {
+      final avg = _overview!['average_score'];
+      if (avg != null) return (avg as num).toDouble();
+    }
+    return (SampleData.mockTestHistory.first['score'] as int).toDouble();
+  }
+
+  int get _testsTaken =>
+      _overview?['total_tests_taken'] as int? ??
+      SampleData.mockTestHistory.length;
+
+  String get _avgScore {
+    if (_overview != null) {
+      final avg = _overview!['average_score'];
+      if (avg != null) return '${(avg as num).toStringAsFixed(0)}%';
+    }
+    final scores = SampleData.mockTestHistory.map((t) => t['score'] as int);
+    final sum = scores.reduce((a, b) => a + b);
+    return '${(sum / scores.length).toStringAsFixed(0)}%';
+  }
+
+  String get _totalTime {
+    if (_overview != null) {
+      final mins = _overview!['total_time_spent_minutes'];
+      if (mins != null) {
+        final m = (mins as num).toInt();
+        return m >= 60 ? '${m ~/ 60}h ${m % 60}m' : '${m}m';
+      }
+    }
+    return '8h 55m';
+  }
+
+  List<Map<String, dynamic>> get _chartData {
+    if (_progressData.isNotEmpty) return _progressData;
+    return SampleData.weeklyProgress;
+  }
+
+  List<Map<String, dynamic>> get _recentTests {
+    if (_attempts.isNotEmpty) return _attempts.take(5).toList();
+    return SampleData.mockTestHistory;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_errorMsg != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.maths.withAlpha(25),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.wifi_off_rounded,
+                      size: 16,
+                      color: AppColors.maths,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _errorMsg!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.maths,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              TextButton(onPressed: () {}, child: const Text('See All')),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...tests.map((t) => _buildTestCard(t)),
-          const SizedBox(height: 20),
-        ],
+            _buildGreeting(),
+            const SizedBox(height: 24),
+            _buildOverallScoreCard(_latestScore),
+            const SizedBox(height: 20),
+            _buildQuickStats(),
+            const SizedBox(height: 24),
+            const Text(
+              'Weekly Progress',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildProgressChart(),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Recent Tests',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                TextButton(onPressed: () {}, child: const Text('See All')),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ..._recentTests.map((t) => _buildAttemptCard(t)),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
@@ -72,10 +223,10 @@ class DashboardScreen extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Center(
+          child: Center(
             child: Text(
-              'AS',
-              style: TextStyle(
+              _avatarInitials,
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
                 fontSize: 18,
@@ -88,7 +239,7 @@ class DashboardScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Hello, ${SampleData.sampleName.split(' ').first}! 👋',
+              'Hello, $_displayName! 👋',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
@@ -216,26 +367,26 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildQuickStats(List<Map<String, dynamic>> tests) {
+  Widget _buildQuickStats() {
     return Row(
       children: [
         _statCard(
           Icons.quiz_outlined,
-          '${tests.length}',
+          '$_testsTaken',
           'Tests Taken',
           AppColors.physics,
         ),
         const SizedBox(width: 12),
         _statCard(
           Icons.trending_up,
-          '${(tests.map((t) => t['score'] as int).reduce((a, b) => a + b) / tests.length).toStringAsFixed(0)}%',
+          _avgScore,
           'Avg Score',
           AppColors.chemistry,
         ),
         const SizedBox(width: 12),
         _statCard(
           Icons.timer_outlined,
-          '8h 55m',
+          _totalTime,
           'Total Time',
           AppColors.maths,
         ),
@@ -293,7 +444,7 @@ class DashboardScreen extends StatelessWidget {
   }
 
   Widget _buildProgressChart() {
-    final data = SampleData.weeklyProgress;
+    final data = _chartData;
     final maxScore = 100.0;
 
     return Container(
@@ -313,9 +464,17 @@ class DashboardScreen extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: data.map((d) {
-          final score = (d['score'] as int).toDouble();
+          // API format: avg_score + week_start; sample: score + week
+          final rawScore = d['avg_score'] ?? d['score'] ?? 0;
+          final score = (rawScore as num).toDouble();
           final height = (score / maxScore) * 120;
           final color = AppColors.gradeColor(score);
+          // Label: use week_start (trim to 'W1' style) or 'week'
+          String label = d['week'] as String? ?? '';
+          if (label.isEmpty) {
+            final ws = d['week_start']?.toString() ?? '';
+            label = ws.length >= 10 ? ws.substring(5, 10) : ws;
+          }
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -344,7 +503,7 @@ class DashboardScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    d['week'] as String,
+                    label,
                     style: const TextStyle(
                       fontSize: 11,
                       color: AppColors.textLight,
@@ -360,10 +519,25 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTestCard(Map<String, dynamic> test) {
-    final score = (test['score'] as int).toDouble();
+  /// Renders a card for both API TestAttemptOut and sample-data format.
+  Widget _buildAttemptCard(Map<String, dynamic> item) {
+    // API format uses 'percentage'; sample uses 'score' (0-100 int)
+    final rawScore = item['percentage'] ?? item['score'] ?? 0;
+    final score = (rawScore as num).toDouble();
     final color = AppColors.gradeColor(score);
     final label = AppColors.gradeLabel(score);
+    // Title
+    final title =
+        item['name']?.toString() ?? item['test_id']?.toString() ?? 'Test';
+    // Date
+    final date =
+        item['created_at']?.toString().split('T').first ??
+        item['date']?.toString() ??
+        '';
+    // Duration
+    final dur = item['time_taken_minutes'] != null
+        ? '${item['time_taken_minutes']} min'
+        : item['duration']?.toString() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -399,7 +573,7 @@ class DashboardScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  test['name'] as String,
+                  title,
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
@@ -408,7 +582,7 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${test['date']}  •  ${test['duration']}',
+                  '$date${dur.isNotEmpty ? '  •  $dur' : ''}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppColors.textLight,

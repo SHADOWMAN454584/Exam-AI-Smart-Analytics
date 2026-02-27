@@ -1,124 +1,301 @@
 import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../constants/sample_data.dart';
+import '../services/api_service.dart';
 
-class ProgressScreen extends StatelessWidget {
+class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
 
   @override
+  State<ProgressScreen> createState() => _ProgressScreenState();
+}
+
+class _ProgressScreenState extends State<ProgressScreen> {
+  bool _isLoading = true;
+  bool _usingFallback = false;
+  Map<String, dynamic>? _overview;
+  Map<String, dynamic>? _progressData;
+  final Map<String, Map<String, dynamic>> _subjectData = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final results = await Future.wait([
+        ApiService.getAnalyticsOverview(),
+        ApiService.getAnalyticsProgress(),
+        ApiService.getSubjectAnalytics('Physics'),
+        ApiService.getSubjectAnalytics('Chemistry'),
+        ApiService.getSubjectAnalytics('Maths'),
+      ]);
+      if (mounted) {
+        setState(() {
+          _overview = results[0] as Map<String, dynamic>?;
+          _progressData = results[1] as Map<String, dynamic>?;
+          _subjectData['Physics'] = (results[2] as Map<String, dynamic>?) ?? {};
+          _subjectData['Chemistry'] =
+              (results[3] as Map<String, dynamic>?) ?? {};
+          _subjectData['Maths'] = (results[4] as Map<String, dynamic>?) ?? {};
+          _usingFallback = false;
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted)
+        setState(() {
+          _usingFallback = true;
+          _isLoading = false;
+        });
+    }
+  }
+
+  double get _overallPct =>
+      (_overview?['overall_percentage'] as num?)?.toDouble() ?? 76.4;
+
+  List<Map<String, dynamic>> get _weeklyChartData {
+    final weekly = (_progressData?['weekly_progress'] as List?)
+        ?.cast<Map<String, dynamic>>();
+    if (weekly != null && weekly.isNotEmpty) {
+      return weekly
+          .map(
+            (w) => {
+              'score': (w['avg_score'] as num?)?.toDouble() ?? 0.0,
+              'week': (w['week_start'] as String?)?.substring(5) ?? '?',
+            },
+          )
+          .toList();
+    }
+    return SampleData.weeklyProgress
+        .map(
+          (d) => {
+            'score': (d['score'] as int).toDouble(),
+            'week': d['week'] as String,
+          },
+        )
+        .toList();
+  }
+
+  double _subjectScore(String subject) {
+    final sp = _overview?['subject_performance'] as Map<String, dynamic>?;
+    if (sp != null && sp.containsKey(subject)) {
+      final e = sp[subject] as Map<String, dynamic>;
+      return (e['avg_score'] as num?)?.toDouble() ??
+          (e['percentage'] as num?)?.toDouble() ??
+          0.0;
+    }
+    final sa = _subjectData[subject];
+    if (sa != null) return (sa['avg_score'] as num?)?.toDouble() ?? 0.0;
+    return subject == 'Physics'
+        ? 74.5
+        : subject == 'Chemistry'
+        ? 78.2
+        : 76.4;
+  }
+
+  List<_TopicScore> _topicsFor(String subject) {
+    final sa = _subjectData[subject];
+    final topics = (sa?['topic_breakdown'] as List?)
+        ?.cast<Map<String, dynamic>>();
+    if (topics != null && topics.isNotEmpty) {
+      return topics
+          .map(
+            (t) => _TopicScore(
+              t['topic'] as String? ?? '?',
+              (t['avg_score'] as num?)?.toDouble() ??
+                  (t['correct'] != null && t['total'] != null
+                      ? (t['correct'] as num) / (t['total'] as num) * 100
+                      : 0.0),
+            ),
+          )
+          .toList();
+    }
+    if (subject == 'Physics') {
+      return [
+        _TopicScore('Mechanics', 82),
+        _TopicScore('Electrostatics', 68),
+        _TopicScore('Optics', 75),
+        _TopicScore('Thermodynamics', 88),
+        _TopicScore('Modern Physics', 60),
+      ];
+    } else if (subject == 'Chemistry') {
+      return [
+        _TopicScore('Organic', 72),
+        _TopicScore('Inorganic', 85),
+        _TopicScore('Physical', 78),
+        _TopicScore('Coordination', 65),
+      ];
+    }
+    return [
+      _TopicScore('Calculus', 82),
+      _TopicScore('Algebra', 78),
+      _TopicScore('Coordinate Geo', 70),
+      _TopicScore('Trigonometry', 85),
+      _TopicScore('Probability', 67),
+    ];
+  }
+
+  List<String> _strengthTopics() {
+    final all =
+        [
+            'Physics',
+            'Chemistry',
+            'Maths',
+          ].expand(_topicsFor).where((t) => t.score >= 80).toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
+    return all.isEmpty
+        ? ['Thermodynamics', 'Inorganic Chem', 'Trigonometry']
+        : all.take(3).map((t) => t.name).toList();
+  }
+
+  List<String> _weakTopics() {
+    final all =
+        [
+            'Physics',
+            'Chemistry',
+            'Maths',
+          ].expand(_topicsFor).where((t) => t.score < 70).toList()
+          ..sort((a, b) => a.score.compareTo(b.score));
+    return all.isEmpty
+        ? ['Modern Physics', 'Coordination', 'Probability']
+        : all.take(3).map((t) => t.name).toList();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Progress Analytics 📊',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Track your preparation journey',
-            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-          ),
-          const SizedBox(height: 24),
-
-          // Overall Performance Card
-          _buildOverallPerformance(),
-          const SizedBox(height: 20),
-
-          // Score Trend
-          const Text(
-            'Score Trend',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildScoreTrend(),
-          const SizedBox(height: 24),
-
-          // Subject-wise breakdown
-          const Text(
-            'Subject Performance',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildSubjectCard('Physics', 74.5, AppColors.physics, [
-            _TopicScore('Mechanics', 82),
-            _TopicScore('Electrostatics', 68),
-            _TopicScore('Optics', 75),
-            _TopicScore('Thermodynamics', 88),
-            _TopicScore('Modern Physics', 60),
-          ]),
-          const SizedBox(height: 12),
-          _buildSubjectCard('Chemistry', 78.2, AppColors.chemistry, [
-            _TopicScore('Organic', 72),
-            _TopicScore('Inorganic', 85),
-            _TopicScore('Physical', 78),
-            _TopicScore('Coordination', 65),
-          ]),
-          const SizedBox(height: 12),
-          _buildSubjectCard('Mathematics', 76.4, AppColors.maths, [
-            _TopicScore('Calculus', 82),
-            _TopicScore('Algebra', 78),
-            _TopicScore('Coordinate Geo', 70),
-            _TopicScore('Trigonometry', 85),
-            _TopicScore('Probability', 67),
-          ]),
-          const SizedBox(height: 24),
-
-          // Strength & Weakness
-          Row(
-            children: [
-              Expanded(
-                child: _buildStrengthWeakCard(
-                  'Strengths 💪',
-                  AppColors.success,
-                  ['Thermodynamics', 'Inorganic Chem', 'Trigonometry'],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStrengthWeakCard('Weak Areas ⚡', AppColors.error, [
-                  'Modern Physics',
-                  'Coordination',
-                  'Probability',
-                ]),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // Accuracy and Speed stats
-          const Text(
-            'Test Statistics',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildStatGrid(),
-          const SizedBox(height: 24),
-        ],
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: _buildBody(),
       ),
     );
   }
 
+  Widget _buildBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_usingFallback)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.withAlpha(25),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.orange.withAlpha(80)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.wifi_off, color: Colors.orange, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'Offline mode — showing sample data',
+                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                ),
+              ],
+            ),
+          ),
+        const Text(
+          'Progress Analytics 📊',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Track your preparation journey',
+          style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 24),
+        _buildOverallPerformance(),
+        const SizedBox(height: 20),
+        const Text(
+          'Score Trend',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildScoreTrend(),
+        const SizedBox(height: 24),
+        const Text(
+          'Subject Performance',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildSubjectCard(
+          'Physics',
+          _subjectScore('Physics'),
+          AppColors.physics,
+          _topicsFor('Physics'),
+        ),
+        const SizedBox(height: 12),
+        _buildSubjectCard(
+          'Chemistry',
+          _subjectScore('Chemistry'),
+          AppColors.chemistry,
+          _topicsFor('Chemistry'),
+        ),
+        const SizedBox(height: 12),
+        _buildSubjectCard(
+          'Mathematics',
+          _subjectScore('Maths'),
+          AppColors.maths,
+          _topicsFor('Maths'),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStrengthWeakCard(
+                'Strengths 💪',
+                AppColors.success,
+                _strengthTopics(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildStrengthWeakCard(
+                'Weak Areas ⚡',
+                AppColors.error,
+                _weakTopics(),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Test Statistics',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildStatGrid(),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
   Widget _buildOverallPerformance() {
-    const double overall = 76.4;
+    final overall = _overallPct;
     final color = AppColors.gradeColor(overall);
     final label = AppColors.gradeLabel(overall);
 
@@ -174,7 +351,7 @@ class ProgressScreen extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '+5.2%',
+                            '+${((_overview?['improvement'] as num?)?.toDouble() ?? 5.2).toStringAsFixed(1)}%',
                             style: TextStyle(
                               color: AppColors.success,
                               fontSize: 14,
@@ -225,9 +402,9 @@ class ProgressScreen extends StatelessWidget {
                     strokeCap: StrokeCap.round,
                   ),
                 ),
-                const Text(
-                  '76%',
-                  style: TextStyle(
+                Text(
+                  '${overall.toInt()}%',
+                  style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
@@ -242,7 +419,7 @@ class ProgressScreen extends StatelessWidget {
   }
 
   Widget _buildScoreTrend() {
-    final data = SampleData.weeklyProgress;
+    final data = _weeklyChartData;
     return Container(
       height: 200,
       padding: const EdgeInsets.all(20),
@@ -302,7 +479,7 @@ class ProgressScreen extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: data.map((d) {
-                final score = (d['score'] as int).toDouble();
+                final score = d['score'] as double;
                 final height = (score / 100) * 100;
                 final color = AppColors.gradeColor(score);
                 return Expanded(
@@ -537,13 +714,31 @@ class ProgressScreen extends StatelessWidget {
   }
 
   Widget _buildStatGrid() {
+    final accuracy = (_overview?['accuracy'] as num?)?.toDouble() ?? 72.0;
+    final testsTaken = (_overview?['total_tests'] as num?)?.toInt() ?? 12;
+    final avgTime = (_overview?['avg_time'] as num?)?.toDouble() ?? 2.1;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
       children: [
-        _statTile('Accuracy', '72%', Icons.gps_fixed, AppColors.physics),
-        _statTile('Avg Speed', '2.1 min/Q', Icons.speed, AppColors.chemistry),
-        _statTile('Tests Taken', '12', Icons.assignment, AppColors.maths),
+        _statTile(
+          'Accuracy',
+          '${accuracy.toInt()}%',
+          Icons.gps_fixed,
+          AppColors.physics,
+        ),
+        _statTile(
+          'Avg Speed',
+          '${avgTime.toStringAsFixed(1)} min/Q',
+          Icons.speed,
+          AppColors.chemistry,
+        ),
+        _statTile(
+          'Tests Taken',
+          '$testsTaken',
+          Icons.assignment,
+          AppColors.maths,
+        ),
         _statTile(
           'Streak',
           '5 days',

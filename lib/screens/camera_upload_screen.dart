@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../constants/app_theme.dart';
+import '../constants/app_constants.dart';
+import '../services/api_service.dart';
 
 class CameraUploadScreen extends StatefulWidget {
   const CameraUploadScreen({super.key});
@@ -12,30 +15,66 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
   bool _isProcessing = false;
   bool _hasResult = false;
   String _selectedExam = 'JEE Main';
+  Map<String, dynamic>? _scanResult;
+  String? _errorMsg;
 
-  final List<String> _examTypes = [
-    'JEE Main',
-    'JEE Advanced',
-    'NEET',
-    'GATE',
-    'CAT',
-  ];
+  final ImagePicker _picker = ImagePicker();
 
-  void _simulateUpload() async {
-    setState(() {
-      _isProcessing = true;
-      _hasResult = false;
-    });
+  Future<void> _pickAndUpload(ImageSource source) async {
+    try {
+      final file = await _picker.pickImage(
+        source: source,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (file == null) return;
 
-    // Simulate processing time
-    await Future.delayed(const Duration(seconds: 2));
+      setState(() {
+        _isProcessing = true;
+        _hasResult = false;
+        _scanResult = null;
+        _errorMsg = null;
+      });
 
-    if (!mounted) return;
-    setState(() {
-      _isProcessing = false;
-      _hasResult = true;
-    });
+      final bytes = await file.readAsBytes();
+      final result = await ApiService.scanPaper(
+        imageBytes: bytes,
+        filename: file.name,
+        examType: _selectedExam,
+      );
+
+      if (mounted) {
+        setState(() {
+          _scanResult = result as Map<String, dynamic>?;
+          _isProcessing = false;
+          _hasResult = true;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMsg = e.message;
+          _isProcessing = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMsg = 'Upload failed. Please try again.';
+          _isProcessing = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload failed. Please try again.')),
+        );
+      }
+    }
   }
+
+  // Legacy tap-to-upload (gallery)
+  void _simulateUpload() => _pickAndUpload(ImageSource.gallery);
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +115,7 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
                   Icons.keyboard_arrow_down,
                   color: AppColors.primary,
                 ),
-                items: _examTypes.map((e) {
+                items: AppConstants.examTypes.map((e) {
                   return DropdownMenuItem(value: e, child: Text(e));
                 }).toList(),
                 onChanged: (v) => setState(() => _selectedExam = v!),
@@ -118,7 +157,7 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
                   icon: Icons.camera_alt_outlined,
                   label: 'Camera',
                   color: AppColors.primary,
-                  onTap: _simulateUpload,
+                  onTap: () => _pickAndUpload(ImageSource.camera),
                 ),
               ),
               const SizedBox(width: 12),
@@ -127,7 +166,7 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
                   icon: Icons.photo_library_outlined,
                   label: 'Gallery',
                   color: AppColors.accent,
-                  onTap: _simulateUpload,
+                  onTap: () => _pickAndUpload(ImageSource.gallery),
                 ),
               ),
               const SizedBox(width: 12),
@@ -136,12 +175,40 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
                   icon: Icons.picture_as_pdf_outlined,
                   label: 'PDF',
                   color: AppColors.maths,
-                  onTap: _simulateUpload,
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('PDF upload coming soon!')),
+                    );
+                  },
                 ),
               ),
             ],
           ),
           const SizedBox(height: 28),
+
+          // Error banner
+          if (_errorMsg != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.red.withAlpha(20),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.red.withAlpha(80)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMsg!,
+                      style: const TextStyle(fontSize: 12, color: Colors.red),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // Result area
           if (_hasResult) _buildMockResult(),
@@ -248,6 +315,12 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
   }
 
   Widget _buildMockResult() {
+    final questionsExtracted =
+        (_scanResult?['questions_extracted'] as num?)?.toInt() ?? 0;
+    final extractedText = (_scanResult?['extracted_text'] as String?) ?? '';
+    final status = (_scanResult?['status'] as String?) ?? 'completed';
+    final subjects = (_scanResult?['subjects'] as String?) ?? _selectedExam;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -283,11 +356,33 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
             children: [
               _resultRow('Exam', _selectedExam),
               const Divider(height: 20),
-              _resultRow('Questions Found', '15'),
+              _resultRow('Questions Found', '$questionsExtracted'),
               const Divider(height: 20),
-              _resultRow('Subjects', 'Physics, Chemistry, Maths'),
+              _resultRow('Subjects', subjects),
               const Divider(height: 20),
-              _resultRow('Year', '2024'),
+              _resultRow('Status', status),
+              if (extractedText.isNotEmpty) ...[
+                const Divider(height: 20),
+                const Text(
+                  'Extracted Text Preview',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  extractedText.length > 200
+                      ? '${extractedText.substring(0, 200)}...'
+                      : extractedText,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textPrimary,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/app_theme.dart';
 import '../constants/sample_data.dart';
+import '../services/api_service.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,12 +15,23 @@ class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _isRegisterMode = false;
+  String _examTarget = 'JEE Main';
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
+
+  final List<String> _examTargets = [
+    'JEE Main',
+    'JEE Advanced',
+    'NEET',
+    'GATE',
+    'CAT',
+  ];
 
   @override
   void initState() {
@@ -40,41 +52,72 @@ class _LoginScreenState extends State<LoginScreen>
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _nameController.dispose();
     _animController.dispose();
     super.dispose();
   }
 
-  Future<void> _login() async {
+  void _toggleMode() {
+    setState(() {
+      _isRegisterMode = !_isRegisterMode;
+      _formKey.currentState?.reset();
+    });
+  }
+
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isLoading = true);
-
-    // Simulate network delay
-    await Future.delayed(const Duration(milliseconds: 1200));
-
-    if (!mounted) return;
 
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (email == SampleData.sampleEmail &&
-        password == SampleData.samplePassword) {
+    try {
+      if (_isRegisterMode) {
+        await ApiService.register(
+          email: email,
+          password: password,
+          fullName: _nameController.text.trim(),
+          examTarget: _examTarget,
+        );
+      } else {
+        await ApiService.login(email, password);
+      }
+      if (!mounted) return;
       Navigator.of(
         context,
       ).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
-    } else {
+    } on ApiException catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Invalid credentials. Use the sample account.'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
+      _showError(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      // Offline fallback: accept demo credentials
+      if (!_isRegisterMode &&
+          email == SampleData.sampleEmail &&
+          password == SampleData.samplePassword) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      } else {
+        _showError(
+          'Could not reach the server. Check your connection.\n'
+          'Demo: ${SampleData.sampleEmail} / ${SampleData.samplePassword}',
+        );
+      }
     }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   void _fillSampleCredentials() {
@@ -148,23 +191,55 @@ class _LoginScreenState extends State<LoginScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Welcome Back 👋',
-                              style: TextStyle(
+                            Text(
+                              _isRegisterMode
+                                  ? 'Create Account 🎓'
+                                  : 'Welcome Back 👋',
+                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.textPrimary,
                               ),
                             ),
                             const SizedBox(height: 4),
-                            const Text(
-                              'Sign in to continue your preparation',
-                              style: TextStyle(
+                            Text(
+                              _isRegisterMode
+                                  ? 'Sign up to start your journey'
+                                  : 'Sign in to continue your preparation',
+                              style: const TextStyle(
                                 fontSize: 13,
                                 color: AppColors.textSecondary,
                               ),
                             ),
                             const SizedBox(height: 28),
+                            // Full name (register only)
+                            if (_isRegisterMode) ...[
+                              TextFormField(
+                                controller: _nameController,
+                                textCapitalization: TextCapitalization.words,
+                                decoration: InputDecoration(
+                                  labelText: 'Full Name',
+                                  hintText: 'Arjun Sharma',
+                                  prefixIcon: const Icon(
+                                    Icons.person_outline,
+                                    color: AppColors.primary,
+                                  ),
+                                  filled: true,
+                                  fillColor: AppColors.background,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                ),
+                                validator: (v) {
+                                  if (v == null || v.trim().length < 2) {
+                                    return 'Name must be at least 2 characters';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 18),
+                            ],
                             // Email
                             TextFormField(
                               controller: _emailController,
@@ -233,13 +308,43 @@ class _LoginScreenState extends State<LoginScreen>
                                 return null;
                               },
                             ),
+                            // Exam target (register only)
+                            if (_isRegisterMode) ...[
+                              const SizedBox(height: 18),
+                              DropdownButtonFormField<String>(
+                                value: _examTarget,
+                                decoration: InputDecoration(
+                                  labelText: 'Target Exam',
+                                  prefixIcon: const Icon(
+                                    Icons.school_outlined,
+                                    color: AppColors.primary,
+                                  ),
+                                  filled: true,
+                                  fillColor: AppColors.background,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                ),
+                                items: _examTargets
+                                    .map(
+                                      (e) => DropdownMenuItem(
+                                        value: e,
+                                        child: Text(e),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) =>
+                                    setState(() => _examTarget = v!),
+                              ),
+                            ],
                             const SizedBox(height: 28),
-                            // Login button
+                            // Submit button
                             SizedBox(
                               width: double.infinity,
                               height: 54,
                               child: ElevatedButton(
-                                onPressed: _isLoading ? null : _login,
+                                onPressed: _isLoading ? null : _submit,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
                                   foregroundColor: Colors.white,
@@ -257,13 +362,30 @@ class _LoginScreenState extends State<LoginScreen>
                                           color: Colors.white,
                                         ),
                                       )
-                                    : const Text(
-                                        'Sign In',
-                                        style: TextStyle(
+                                    : Text(
+                                        _isRegisterMode
+                                            ? 'Create Account'
+                                            : 'Sign In',
+                                        style: const TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Center(
+                              child: TextButton(
+                                onPressed: _toggleMode,
+                                child: Text(
+                                  _isRegisterMode
+                                      ? 'Already have an account? Sign In'
+                                      : "Don't have an account? Sign Up",
+                                  style: const TextStyle(
+                                    color: AppColors.primary,
+                                    fontSize: 13,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -271,59 +393,60 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ),
                     const SizedBox(height: 20),
-                    // Sample account helper
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(30),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withAlpha(50)),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Demo Account',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white.withAlpha(220),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Email: ${SampleData.sampleEmail}\nPassword: ${SampleData.samplePassword}',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.white.withAlpha(180),
-                              height: 1.5,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TextButton.icon(
-                            onPressed: _fillSampleCredentials,
-                            icon: const Icon(
-                              Icons.auto_fix_high,
-                              size: 18,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              'Auto-fill Demo Credentials',
+                    // Sample account helper (login mode only)
+                    if (!_isRegisterMode)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(30),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white.withAlpha(50)),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'Demo Account',
                               style: TextStyle(
-                                color: Colors.white,
                                 fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white.withAlpha(220),
                               ),
                             ),
-                            style: TextButton.styleFrom(
-                              backgroundColor: Colors.white.withAlpha(30),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Email: ${SampleData.sampleEmail}\nPassword: ${SampleData.samplePassword}',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white.withAlpha(180),
+                                height: 1.5,
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 10),
+                            TextButton.icon(
+                              onPressed: _fillSampleCredentials,
+                              icon: const Icon(
+                                Icons.auto_fix_high,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                              label: const Text(
+                                'Auto-fill Demo Credentials',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              style: TextButton.styleFrom(
+                                backgroundColor: Colors.white.withAlpha(30),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                     const SizedBox(height: 30),
                   ],
                 ),
