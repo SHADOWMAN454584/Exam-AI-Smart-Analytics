@@ -287,4 +287,99 @@ class ApiService {
   ) async {
     return await _get('/api/ocr/papers/$paperId') as Map<String, dynamic>;
   }
+
+  // ── Document Upload & AI Test Generation ───────────────────────────────────
+
+  /// Upload a PDF file for AI scanning and question extraction.
+  /// Returns upload metadata including a [document_id].
+  static Future<Map<String, dynamic>> uploadPdf({
+    required List<int> pdfBytes,
+    required String filename,
+    required String examType,
+    String? subject,
+  }) async {
+    final uri = Uri.parse('${AppConstants.baseUrl}/api/documents/upload');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $_token'
+      ..fields['exam_type'] = examType;
+    if (subject != null) request.fields['subject'] = subject;
+    request.files.add(
+      http.MultipartFile.fromBytes('file', pdfBytes, filename: filename),
+    );
+
+    final streamed = await request.send().timeout(const Duration(seconds: 90));
+    final res = await http.Response.fromStream(streamed);
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw ApiException(res.statusCode, res.body);
+  }
+
+  /// Upload an image (photo of notes/book/question paper) for AI scanning.
+  /// Returns upload metadata including a [document_id].
+  static Future<Map<String, dynamic>> uploadDocumentImage({
+    required List<int> imageBytes,
+    required String filename,
+    required String examType,
+    String? subject,
+  }) async {
+    final uri = Uri.parse('${AppConstants.baseUrl}/api/documents/upload');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $_token'
+      ..fields['exam_type'] = examType;
+    if (subject != null) request.fields['subject'] = subject;
+    request.files.add(
+      http.MultipartFile.fromBytes('file', imageBytes, filename: filename),
+    );
+
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    final res = await http.Response.fromStream(streamed);
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw ApiException(res.statusCode, res.body);
+  }
+
+  /// Generate an AI test from a previously uploaded document.
+  /// [documentId] is returned from uploadPdf / uploadDocumentImage.
+  /// [questionCount] controls how many questions the AI should generate.
+  static Future<Map<String, dynamic>> generateTestFromDocument({
+    required String documentId,
+    int questionCount = 10,
+    String difficulty = 'Mixed',
+    String examType = 'JEE Main',
+    String? subject,
+  }) async {
+    return await _post('/api/documents/generate-test', {
+          'document_id': documentId,
+          'num_questions': questionCount,
+          'difficulty': difficulty,
+          'exam_type': examType,
+          if (subject != null) 'subject': subject,
+        })
+        as Map<String, dynamic>;
+  }
+
+  /// Get all uploaded documents for the current user.
+  static Future<List<Map<String, dynamic>>> getUploadedDocuments() async {
+    final data = await _get('/api/documents/') as List;
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// Get details + extracted content of a single document.
+  static Future<Map<String, dynamic>> getDocumentDetail(
+    String documentId,
+  ) async {
+    return await _get('/api/documents/$documentId') as Map<String, dynamic>;
+  }
+
+  /// Get AI-generated tests linked to a specific document.
+  static Future<List<Map<String, dynamic>>> getDocumentTests(
+    String documentId,
+  ) async {
+    final data = await _get('/api/documents/$documentId/tests') as List;
+    return data.cast<Map<String, dynamic>>();
+  }
 }

@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import '../constants/app_theme.dart';
 import '../constants/app_constants.dart';
 import '../services/api_service.dart';
+import 'document_upload_screen.dart';
 
 class CameraUploadScreen extends StatefulWidget {
   const CameraUploadScreen({super.key});
@@ -176,8 +177,10 @@ class _CameraUploadScreenState extends State<CameraUploadScreen> {
                   label: 'PDF',
                   color: AppColors.maths,
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('PDF upload coming soon!')),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const DocumentUploadScreen(),
+                      ),
                     );
                   },
                 ),

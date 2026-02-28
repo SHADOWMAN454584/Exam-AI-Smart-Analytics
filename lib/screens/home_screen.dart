@@ -7,6 +7,7 @@ import 'camera_upload_screen.dart';
 import 'progress_screen.dart';
 import 'recommendation_screen.dart';
 import 'login_screen.dart';
+import 'document_upload_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -69,6 +70,15 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.upload_file_rounded),
+            tooltip: 'Upload PDF / Image',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DocumentUploadScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.notifications_none_rounded),
             onPressed: () {},
